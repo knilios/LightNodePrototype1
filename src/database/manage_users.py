@@ -3,7 +3,16 @@ from __future__ import annotations
 import argparse
 import getpass
 
-from src.core.auth import create_user, list_users, reset_password, revoke_user_tokens, set_user_active
+from src.core.auth import (
+    create_user,
+    issue_access_token_for_user,
+    list_tokens,
+    list_users,
+    reset_password,
+    revoke_token_by_id,
+    revoke_user_tokens,
+    set_user_active,
+)
 from src.database.db import init_database
 
 
@@ -25,6 +34,17 @@ def _build_parser() -> argparse.ArgumentParser:
     activate_cmd.add_argument("username")
 
     subparsers.add_parser("list-users", help="List all users")
+
+    token_create_cmd = subparsers.add_parser("create-access-token", help="Create host-issued access token")
+    token_create_cmd.add_argument("username")
+    token_create_cmd.add_argument("--days", type=int, default=30)
+    token_create_cmd.add_argument("--extension-id", default=None)
+
+    token_list_cmd = subparsers.add_parser("list-tokens", help="List tokens")
+    token_list_cmd.add_argument("--username", default=None)
+
+    token_revoke_cmd = subparsers.add_parser("revoke-token", help="Revoke token by id")
+    token_revoke_cmd.add_argument("token_id")
 
     return parser
 
@@ -79,6 +99,37 @@ def main() -> None:
         for user in users:
             state = "active" if int(user["is_active"]) == 1 else "inactive"
             print(f"{user['username']} | {user['role']} | {state} | {user['id']}")
+        return
+
+    if args.command == "create-access-token":
+        token = issue_access_token_for_user(
+            username=args.username,
+            extension_id=args.extension_id,
+            days_valid=args.days,
+        )
+        print(f"Token ID: {token['token_id']}")
+        print(f"Access Token: {token['access_token']}")
+        print(f"Expires At: {token['expires_at']}")
+        return
+
+    if args.command == "list-tokens":
+        tokens = list_tokens(username=args.username)
+        if not tokens:
+            print("No tokens")
+            return
+        for token in tokens:
+            status = "revoked" if token["revoked_at"] else "active"
+            print(
+                f"{token['id']} | {token['username']} | {status} | "
+                f"issued={token['issued_at']} | expires={token['expires_at']} | ext={token['extension_id']}"
+            )
+        return
+
+    if args.command == "revoke-token":
+        if not revoke_token_by_id(args.token_id):
+            raise SystemExit("Token not found or already revoked")
+        print("Token revoked")
+        return
 
 
 if __name__ == "__main__":

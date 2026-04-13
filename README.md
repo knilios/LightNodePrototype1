@@ -35,6 +35,17 @@ Useful commands:
 2. Use returned bearer token in `Authorization` header for protected routes
 3. `POST /auth/logout` to revoke token
 
+## Access token alternative (host-issued)
+
+Use a long-lived token generated on host as an alternative to username/password login:
+
+- `python -m src.database.manage_users create-access-token mcp_server --days 30 --extension-id mcp`
+- `python -m src.database.manage_users list-tokens --username mcp_server`
+- `python -m src.database.manage_users revoke-token <token-id>`
+
+Use the generated token exactly like login tokens:
+- `Authorization: Bearer <access-token>`
+
 ## Endpoints
 
 - `POST /auth/login`

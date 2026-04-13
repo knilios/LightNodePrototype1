@@ -162,6 +162,47 @@ def issue_token(user_id: str, extension_id: str | None = None) -> dict[str, Any]
     }
 
 
+def issue_access_token_for_user(
+    username: str,
+    extension_id: str | None = None,
+    days_valid: int = 30,
+) -> dict[str, Any]:
+    user = _get_user_by_username(username)
+    if user is None:
+        raise ValueError("User not found")
+    if int(user["is_active"]) != 1:
+        raise ValueError("User inactive")
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(raw_token)
+    token_id = str(uuid4())
+    issued_at = _now()
+    expires_at = issued_at + timedelta(days=days_valid)
+
+    connection = get_connection()
+    connection.execute(
+        "INSERT INTO auth_tokens(id, token_hash, user_id, extension_id, issued_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        (
+            token_id,
+            token_hash,
+            user["id"],
+            extension_id,
+            issued_at.isoformat(),
+            expires_at.isoformat(),
+        ),
+    )
+    connection.commit()
+
+    return {
+        "token_id": token_id,
+        "access_token": raw_token,
+        "token_type": "bearer",
+        "issued_at": issued_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "extension_id": extension_id,
+    }
+
+
 def revoke_token(raw_token: str) -> None:
     token_hash = _hash_token(raw_token)
     connection = get_connection()
@@ -203,6 +244,61 @@ def _get_token_record(raw_token: str) -> dict[str, Any] | None:
         (token_hash,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def list_tokens(username: str | None = None) -> list[dict[str, Any]]:
+    connection = get_connection()
+
+    if username:
+        user = _get_user_by_username(username)
+        if user is None:
+            raise ValueError("User not found")
+
+        rows = connection.execute(
+            """
+            SELECT
+                t.id,
+                t.user_id,
+                u.username,
+                t.extension_id,
+                t.issued_at,
+                t.expires_at,
+                t.revoked_at
+            FROM auth_tokens t
+            JOIN users u ON u.id = t.user_id
+            WHERE t.user_id = ?
+            ORDER BY t.issued_at DESC
+            """,
+            (user["id"],),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
+            SELECT
+                t.id,
+                t.user_id,
+                u.username,
+                t.extension_id,
+                t.issued_at,
+                t.expires_at,
+                t.revoked_at
+            FROM auth_tokens t
+            JOIN users u ON u.id = t.user_id
+            ORDER BY t.issued_at DESC
+            """
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def revoke_token_by_id(token_id: str) -> bool:
+    connection = get_connection()
+    cursor = connection.execute(
+        "UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+        (_now_iso(), token_id),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
 
 
 def get_auth_context(
